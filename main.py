@@ -9,40 +9,35 @@ import requests
 import base64
 import websocket
 import shutil
-from datetime import datetime
 from urllib.parse import quote, unquote
 from concurrent.futures import ThreadPoolExecutor
 
 # ------------------ Настройки ------------------
 BASE_DIR = "checked"
+FOLDER_RU = os.path.join(BASE_DIR, "RU_Best")
+FOLDER_EURO = os.path.join(BASE_DIR, "My_Euro")
 
-# Папки назначения
-FOLDER_RU = os.path.join(BASE_DIR, "RU_Best")       # Сюда падают те 7 ссылок
-FOLDER_EURO = os.path.join(BASE_DIR, "My_Euro")     # Сюда падает ваша 1 ссылка (только Европа)
-
-# Создаем структуру заново (чистка)
+# Чистка папок перед запуском
 if os.path.exists(BASE_DIR):
-    # Очищаем содержимое checked, чтобы удалить старые папки (World_Mix и т.д.)
-    # Но оставляем json файлы (историю), чтобы не терять кэш!
     for item in os.listdir(BASE_DIR):
         item_path = os.path.join(BASE_DIR, item)
-        if item.endswith(".json"): continue # Не удаляем историю!
-        if os.path.isdir(item_path): shutil.rmtree(item_path) # Удаляем папки
-        else: os.remove(item_path) # Удаляем файлы
+        if item.endswith(".json"): continue
+        if os.path.isdir(item_path): shutil.rmtree(item_path)
+        else: os.remove(item_path)
 
 os.makedirs(FOLDER_RU, exist_ok=True)
 os.makedirs(FOLDER_EURO, exist_ok=True)
 
-TIMEOUT = 2
-THREADS = 50
+TIMEOUT = 5  
+socket.setdefaulttimeout(TIMEOUT)
+
+THREADS = 40 
 CACHE_HOURS = 12
-CHUNK_LIMIT = 500
+CHUNK_LIMIT = 1000 
 
 HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
-GEO_CACHE_FILE = os.path.join(BASE_DIR, "geo_cache.json")
 MY_CHANNEL = "@vlesstrojan" 
 
-# 1. Источники для RU_Best (проверяем на доступность)
 URLS_RU = [
     "https://raw.githubusercontent.com/zieng2/wl/main/vless.txt",
     "https://raw.githubusercontent.com/LowiKLive/BypassWhitelistRu/refs/heads/main/WhiteList-Bypass_Ru.txt",
@@ -53,15 +48,11 @@ URLS_RU = [
     "https://s3c3.001.gpucloud.ru/vahe4xkwi/cjdr"
 ]
 
-# 2. Ваши источники (только Европа)
 URLS_MY = [
     "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/new/all_new.txt"
 ]
 
-# Коды Европы
 EURO_CODES = {"NL", "DE", "FI", "GB", "FR", "SE", "PL", "CZ", "AT", "CH", "IT", "ES", "NO", "DK", "BE", "IE", "LU", "EE", "LV", "LT"}
-
-# ------------------ Функции ------------------
 
 def load_json(path):
     if os.path.exists(path):
@@ -75,13 +66,18 @@ def save_json(path, data):
         with open(path, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
     except: pass
 
-geo_cache = load_json(GEO_CACHE_FILE)
-
-def get_country(host):
-    if host in geo_cache: return geo_cache[host]
+def get_country_fast(host, key_name):
+    host = host.lower()
+    name = key_name.upper()
+    
     if host.endswith(".ru"): return "RU"
     if host.endswith(".de"): return "DE"
     if host.endswith(".nl"): return "NL"
+    if host.endswith(".uk") or host.endswith(".co.uk"): return "GB"
+    if host.endswith(".fr"): return "FR"
+    
+    for code in EURO_CODES:
+        if code in name: return code
     return "UNKNOWN"
 
 def fetch_keys(urls, tag):
@@ -98,7 +94,8 @@ def fetch_keys(urls, tag):
             else: lines = content.splitlines()
             for l in lines:
                 l = l.strip()
-                if l.startswith(("vless://", "vmess://", "trojan://", "ss://")): out.append((l, tag))
+                if l.startswith(("vless://", "vmess://", "trojan://", "ss://")):
+                    out.append((l, tag))
         except: pass
     return out
 
@@ -109,22 +106,9 @@ def check_single_key(data):
             part = key.split("@")[1].split("?")[0].split("#")[0]
             host, port = part.split(":")[0], int(part.split(":")[1])
         else: return None, None, None
-        
-        # Определяем страну (если нет в кэше - пробуем API, но редко)
-        country = get_country(host)
-        if country == "UNKNOWN" and host not in geo_cache and tag == "MY":
-             # Делаем запрос только для "Ваших" ссылок, чтобы отделить Европу
-             try:
-                 # Лимит: не более 1 запроса в 1.5 сек в потоке (или полагаемся на удачу)
-                 # Тут простая заглушка. В реале лучше использовать локальную MaxMind DB.
-                 # Но попробуем рискнуть для новых IP:
-                 r = requests.get(f"http://ip-api.com/json/{host}?fields=countryCode", timeout=2)
-                 if r.status_code == 200:
-                     country = r.json().get("countryCode", "UNKNOWN")
-                     geo_cache[host] = country # Запоминаем
-             except: pass
 
-        # Проверка коннекта
+        country = get_country_fast(host, key)
+
         is_tls = 'security=tls' in key or 'security=reality' in key or 'trojan://' in key or 'vmess://' in key
         is_ws = 'type=ws' in key or 'net=ws' in key
         path = "/"
@@ -157,48 +141,48 @@ def save_chunked(keys_list, folder, base_name):
         fname = f"{base_name}.txt" if len(chunks) == 1 else f"{base_name}_part{i}.txt"
         with open(os.path.join(folder, fname), "w", encoding="utf-8") as f: f.write("\n".join(chunk))
 
-# ------------------ Main ------------------
+# Функция для проверки формата (вернет None, если формат кривой)
+def extract_ping(key_str):
+    try:
+        # Ожидаемый формат хвоста: ...#123ms_RU_@vlesstrojan
+        label = key_str.split("#")[-1]
+        if "ms_" not in label: return None
+        ping_part = label.split("ms_")[0]
+        return int(ping_part)
+    except:
+        return None
+
 if __name__ == "__main__":
-    print(f"=== CHECKER FINAL (Ru / MyEuro) ===")
+    print(f"=== CHECKER FINAL (Strict Clean) ===")
     
     history = load_json(HISTORY_FILE)
     tasks = fetch_keys(URLS_RU, "RU") + fetch_keys(URLS_MY, "MY")
     
-    # Дедупликация
-    unique_tasks = {k: tag for k, tag in tasks}.items() # k -> tag
+    unique_tasks = {k: tag for k, tag in tasks}.items()
     print(f"Всего ключей: {len(unique_tasks)}")
     
     current_time = time.time()
     to_check = []
-    
-    # Списки результатов
     res_ru = []
     res_euro = []
     
-    # 1. КЭШ
     for k, tag in unique_tasks:
         k_id = k.split("#")[0]
         cached = history.get(k_id)
         if cached and (current_time - cached['time'] < CACHE_HOURS * 3600) and cached['alive']:
             latency = cached['latency']
             country = cached.get('country', 'UNKNOWN')
-            
-            # ФОРМИРОВАНИЕ СТРОКИ
             label = f"{latency}ms_{country}_{MY_CHANNEL}"
             final = f"{k_id}#{label}"
             
-            if tag == "RU":
-                res_ru.append(final)
+            if tag == "RU": res_ru.append(final)
             elif tag == "MY":
-                # ФИЛЬТР ЕВРОПЫ
-                if country in EURO_CODES:
-                    res_euro.append(final)
+                if country in EURO_CODES: res_euro.append(final)
         else:
             to_check.append((k, tag))
 
     print(f"На проверку: {len(to_check)}")
 
-    # 2. ПРОВЕРКА
     if to_check:
         with ThreadPoolExecutor(max_workers=THREADS) as executor:
             future_to_item = {executor.submit(check_single_key, item): item for item in to_check}
@@ -213,45 +197,47 @@ if __name__ == "__main__":
                     label = f"{latency}ms_{country}_{MY_CHANNEL}"
                     final = f"{k_id}#{label}"
                     
-                    if tag == "RU":
-                        res_ru.append(final)
+                    if tag == "RU": res_ru.append(final)
                     elif tag == "MY":
-                        if country in EURO_CODES:
-                            res_euro.append(final)
+                        if country in EURO_CODES: res_euro.append(final)
                 
-                if i % 100 == 0: print(f"Checked {i}...")
+                if i % 500 == 0: print(f"Checked {i}...")
 
-    # Сохраняем базы
     save_json(HISTORY_FILE, {k:v for k,v in history.items() if current_time - v['time'] < 259200})
-    save_json(GEO_CACHE_FILE, geo_cache)
+    
+    print(f"Было RU: {len(res_ru)}")
+    print(f"Было Euro: {len(res_euro)}")
 
-    print(f"RU Valid: {len(res_ru)}")
-    print(f"Euro Valid: {len(res_euro)}")
+    # ЧИСТКА ОТ МУСОРА
+    # Оставляем только те, из которых можно достать цифру пинга
+    res_ru = [k for k in res_ru if extract_ping(k) is not None]
+    res_euro = [k for k in res_euro if extract_ping(k) is not None]
 
-    # Сортировка по пингу
-    res_ru.sort(key=lambda x: int(x.split("_")[0].split("ms")[0].split("#")[-1]))
-    res_euro.sort(key=lambda x: int(x.split("_")[0].split("ms")[0].split("#")[-1]))
+    # СОРТИРОВКА (теперь безопасная, так как мусора нет)
+    res_ru.sort(key=extract_ping)
+    res_euro.sort(key=extract_ping)
+    
+    print(f"Чистых RU: {len(res_ru)}")
+    print(f"Чистых Euro: {len(res_euro)}")
 
-    # Запись
     save_chunked(res_ru, FOLDER_RU, "ru_white")
     save_chunked(res_euro, FOLDER_EURO, "my_euro")
 
-    # ССЫЛКИ ПОДПИСКИ
     GITHUB_USER_REPO = "kort0881/vpn-checker-backend"
     BRANCH = "main"
     BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER_REPO}/{BRANCH}/{BASE_DIR}"
     
     subs = [
-        "=== 🇷🇺 RUSSIA WHITELISTS (Verified) ===",
+        "=== 🇷🇺 RUSSIA WHITELISTS ===",
         f"{BASE_URL}/RU_Best/ru_white.txt",
-        "\n=== 🇪🇺 MY EUROPE (Filtered) ===",
+        "\n=== 🇪🇺 MY EUROPE ===",
         f"{BASE_URL}/My_Euro/my_euro.txt"
     ]
-    
     with open(os.path.join(BASE_DIR, "subscriptions_list.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(subs))
 
-    print("=== DONE ===")
+    print("=== DONE SUCCESS ===")
+
 
 
 
