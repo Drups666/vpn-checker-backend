@@ -45,7 +45,11 @@ URLS_RU = [
 
 # Ссылка на твою папку NEW
 URLS_MY = [
-    "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/refs/heads/main/githubmirror/new/all_new.txt"
+    "https://raw.githubusercontent.com/STR97/STRUGOV/refs/heads/main/STR.BYPASS#STR.BYPASSрџ‘ѕ"
+    "https://raw.githubusercontent.com/STR97/STRUGOV/refs/heads/main/Vless#VLESS.STR.BYPASSрџ”Ґ"
+    "https://raw.githubusercontent.com/STR97/STRUGOV/refs/heads/main/STR#MEGA.STR.BYPASSвљЎпёЏ"
+    "https://raw.githubusercontent.com/STR97/STRUGOV/refs/heads/main/BYPASS#PROXY.STR.BYPASSрџђє"
+    "https://raw.githubusercontent.com/STR97/STRUGOV/refs/heads/main/CUSTOM#CUSTOM.STR.BYPASSрџ¤џ"
 ]
 
 EURO_CODES = {"NL", "DE", "FI", "GB", "FR", "SE", "PL", "CZ", "AT", "CH", "IT", "ES", "NO", "DK", "BE", "IE", "LU", "EE", "LV", "LT"}
@@ -245,7 +249,7 @@ if __name__ == "__main__":
     ru_files = save_chunked(res_ru_clean, FOLDER_RU, "ru_white")
     euro_files = save_chunked(res_euro_clean, FOLDER_EURO, "my_euro")
 
-    GITHUB_USER_REPO = "kort0881/vpn-checker-backend"
+    GITHUB_USER_REPO = "Drups666/vpn-checker-backend"
     BRANCH = "main"
     BASE_URL_RU = f"https://raw.githubusercontent.com/{GITHUB_USER_REPO}/{BRANCH}/{BASE_DIR}/RU_Best"
     BASE_URL_EURO = f"https://raw.githubusercontent.com/{GITHUB_USER_REPO}/{BRANCH}/{BASE_DIR}/My_Euro"
@@ -262,6 +266,7 @@ if __name__ == "__main__":
         f.write("\n".join(subs_lines))
 
     print("=== SUCCESS: LISTS GENERATED ===")
+
 
 
 
